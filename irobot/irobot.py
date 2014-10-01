@@ -127,6 +127,7 @@ class iRobotSensors:
                 i += 1
             else :
                 print('Wrong packet ID: ' + str(pid))
+                return
                 
             i += 1
          
