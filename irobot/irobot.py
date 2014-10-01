@@ -38,7 +38,7 @@ class iRobotSensors:
         return self.__wallSignal()
     
     def parseStream(self, data):
-        i=2
+        i=1
         while i < ord(data[1]):
 #             lenData = getLenOfData(data[i])
 
