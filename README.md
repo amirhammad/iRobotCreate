@@ -1,5 +1,5 @@
-iRobot Create python development library + PyQt Gui
+iRobot Create python development library + PyQt Gui  
 
-Contributors:
-	Peter Belica
-	Amir Hammad
+**Contributors**  
+	Peter Belica  
+	Amir Hammad  
