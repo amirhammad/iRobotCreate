@@ -1,3 +1,5 @@
+""" Copyright Amir Hammad & Peter Belica  			"""
+""" Published under GNU GENERAL PUBLIC LICENSE (see LICENSE)    """
 import serial
 import threading
 from PyQt4 import QtCore, QtGui, uic
