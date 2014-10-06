@@ -8,6 +8,22 @@ from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import QObject, pyqtSignal
 
 
+class iRobotTask1:
+    __robot = 0
+    __currDistance = 0
+    __currAngle = 0
+    def __init__(self, robot):
+        self.__robot = robot
+    def update(self):
+        self.positionCalculate()
+        if (self.__robot.__currDistance >= 1000):
+            self.__robot.stop()
+        print ('update')
+    def positionCalculate(self):
+        self.__currDistance += self.__robot.sensors.distance()
+        self.__currAngle += self.__robot.sensors.angle()
+
+
 class iRobotSensors:
     __bumpLeft = 0
     __bumpRight = 0
@@ -42,6 +58,9 @@ class iRobotSensors:
     # byte 0: LENGTH
     def parseStream(self, data):
         i=1
+        
+#         for o in range(ord(data[0])):
+#             print(ord(data[o]))
         while i < ord(data[0]):
             # PACKET ID
             pid = ord(data[i])
@@ -75,23 +94,33 @@ class iRobotSensors:
             elif pid == 18:
                 pass
             elif pid == 19:
-                self.__distance = ord(data[i])<<8 + ord(data[i+1]) 
+                if ord(data[i])&0x80:
+                    self.__distance = -((ord(data[i])&0x7f)*256 + ord(data[i+1]))
+                else:
+                    self.__distance = (ord(data[i])&0x7f)*256 + ord(data[i+1])
+                print("Distance: " + str(self.__distance))
+#                 self.__distance = ord(data[i])<<8 + ord(data[i+1]) 
                 i += 1
             elif pid == 20:
-                self.__angle = ord(data[i])<<8 + ord(data[i+1]) 
+                if ord(data[i])&0x80:
+                    self.__angle = -((ord(data[i])&0x7f)*256 + ord(data[i+1]))
+                else:
+                    self.__angle = (ord(data[i])&0x7f)*256 + ord(data[i+1])
+                print("Angle: " + str(self.__angle))
+#                 self.__angle = ord(data[i])<<8 + ord(data[i+1]) 
                 i += 1
             elif pid == 21:
                 pass
             elif pid == 22:
                 self.__voltage = ord(data[i])*256 + ord(data[i+1]) 
-                # print("Voltage: " + str(self.__voltage)) 
+#                 print("Voltage: " + str(self.__voltage)) 
                 i += 1
             elif pid == 23:
                 if ord(data[i])&(0x80) != 0:    # negative current
                     self.__current = -1*((ord(data[i])&(0x7f))*256 + ord(data[i+1]))
                 else:   # positive current
                     self.__current = ord(data[i])&(0x7f)*256 + ord(data[i+1])
-                # print("Current: " + str(self.__current)) 
+#                 print("Current: " + str(self.__current)) 
                 i += 1
             elif pid == 24:
                 pass
@@ -147,6 +176,9 @@ class iRobot():
     __streamRunning = 0
     __packetLengthSemaphore = 0
     sensors = 0
+    __currAngle = 0
+    __currDistance = 0
+    __task1 = 0
     
     def __init__(self, path):
         self.sensors = iRobotSensors()
@@ -154,15 +186,25 @@ class iRobot():
         self.__port = serial.Serial(path, baudrate=57600)
         self.__port.open()
         self.__packetLengthSemaphore = threading.Semaphore()
+        self.__task1 = iRobotTask1(self)
 
     def modeSafe(self):
         self.__port.write("\x80\x83")
+#         self.__port.write(str([0x80, 0x83]))
+    def modeFull(self):
+        self.__port.write("\x80\x84")
+    def goCircle(self):
+        self.__port.write("\x89\x00\xff\x00\xff")
+    def goStraight(self):
+        self.__port.write("\x91\x00\xff\x00\xff")
     def stop(self):
         self.__port.write("\x91\x00\x00\x00\x00")
         self.__port.write("\x80")
  
     def streamStart(self, requestedPacketsString):
+        self.goStraight()
         self.__port.write(requestedPacketsString)
+#         self.__port.write("\x94\x04\x07\x1B\x16\x17")
     def streamRead(self):
         self.__streamRunning = True
         while self.__streamRunning:
@@ -181,20 +223,22 @@ class iRobot():
                     data = self.__port.read(self.__packetLength+2)
                     self.__packetLengthSemaphore.release()
                     # checksum calculations START
-                    sum = 0
-                    for i in range(0, len(data)):
-                        sum += ord(data[i])
-                    if sum&(0xff) != 0:     # bad checksum
-                        self.__packetLength = 0
-                        continue
+#                     sum = 0
+#                     for i in range(0, len(data)):
+#                         sum += ord(data[i])
+#                     if sum&(0xff) != 0:     # bad checksum
+#                         self.__packetLength = 0
+#                         continue
                     # checksum calculations END
                     self.sensors.parseStream(data)
+                    self.__task1.update()
                 else :
                     self.__packetLength = 0
         print("iRobot Stream read thread Stopped")
     def streamStop(self):
         self.__port.write("\x96\x00")
         self.__streamRunning = False
+
 
     def __del__(self):
         self.streamStop()
@@ -207,12 +251,12 @@ class mainWidget(QtGui.QWidget):
     def __init__(self):
         super(mainWidget, self).__init__()
         uic.loadUi('iRobotGUI.ui',self)
-        self.__robot = iRobot("/dev/rfcomm11")
+        self.__robot = iRobot("/dev/rfcomm1")
 #         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
         self.show()
         
     def slotStart(self):
-        self.__robot.modeSafe()
+        self.__robot.modeFull()
         print("iRobot Control Enabled")
     def slotStop(self):
         self.__robot.streamStop()
@@ -220,7 +264,9 @@ class mainWidget(QtGui.QWidget):
         print("iRobot Control Disabled")
         
     def slotTask1Start(self):
-        self.streamStart("\x94\x04\x07\x1B\x16\x17")    # bumps, wallSignal, voltage, current
+        
+        
+        self.__robot.streamStart("\x94\x06\x07\x1B\x16\x17\x13\x14")    # bumps, wallSignal, voltage, current, distance, angle
         self.__threadComm = threading.Thread(target=self.__robot.streamRead)
         self.__threadComm.start()
     def slotTask1Stop(self):
