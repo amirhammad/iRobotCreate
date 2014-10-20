@@ -1,3 +1,4 @@
+#!/usr/bin/python
 """
 Library for control iRobotCreate via bluetooth. 
 
@@ -20,6 +21,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import serial
 import threading
 import sys
+from math import *
 from time import sleep  
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import QObject, pyqtSignal
@@ -27,18 +29,69 @@ from PyQt4.QtCore import QObject, pyqtSignal
 
 class iRobotTask1:
     __robot = 0
-    __currDistance = 0
-    __currAngle = 0
+    __currentAngle = 0
+    __currentPosition = 0
+    __targetPosition = 0
+    __rot = 0
+    
+    __WHEEL_DISTANCE = 200.0 #mm
     def __init__(self, robot):
         self.__robot = robot
+        self.__currentPosition = [0,0]
+        self.__targetPosition = [0,0]
+        
     def update(self):
         self.positionCalculate()
-        if (self.__robot.__currDistance >= 1000):
-            self.__robot.stop()
-        print ('update')
+             
+        dist = sqrt((self.__currentPosition[0]-self.__targetPosition[0])**2 
+                + (self.__currentPosition[1]-self.__targetPosition[1])**2)
+        
+        if (dist < 50):
+            self.__robot.setWheelVel(0, 0)
+        else:
+            angleError = atan2(self.__targetPosition[0]-self.__currentPosition[0], 
+                                        self.__targetPosition[1]-self.__currentPosition[1])
+            
+            
+            rot = (0.5*self.__WHEEL_DISTANCE)*(-self.__currentAngle+angleError)
+            vBase = 0.1*dist
+            
+            self.__currentAngle += (rot/self.__WHEEL_DISTANCE)*0.015
+            self.__currentAngle %= 2*pi
+            self.__currentPosition[0] += vBase*0.015*cos(self.__currentAngle)
+            self.__currentPosition[1] -= vBase*0.015*sin(self.__currentAngle)
+            
+            outL = vBase-rot/2
+            if (outL>500):
+                outL=500
+            elif (outL<-500):
+                outL=-500
+                
+            outR = vBase+rot/2
+            if (outR>500):
+                outR=500
+            elif (outR<-500):
+                outR=-500
+                
+            self.__robot.setWheelVel(outL, outR)
+            
+            print ('update '+str(degrees(angleError)) +' '+ str(rot))
+            print('STATE VARS: '+str(self.__currentPosition[0]) +' '+str(self.__currentPosition[1]) +' '+str(degrees(self.__currentAngle)) )
+        
     def positionCalculate(self):
-        self.__currDistance += self.__robot.sensors.distance()
-        self.__currAngle += self.__robot.sensors.angle()
+#         dDistance = self.__robot.sensors.distance()
+#         dAngle = self.__robot.sensors.angle()
+#         self.__currentPosition[0] += dDistance*cos(radians(self.__currentAngle))
+#         self.__currentPosition[1] += dDistance*sin(radians(self.__currentAngle))
+#         self.__currentAngle += dAngle
+#         self.__currentAngle %= 360
+#         print(str(self.__currentPosition[0]) +' '+str(self.__currentPosition[1]) +' '+str(self.__currentAngle) )
+        pass
+    def init(self):
+        pass
+    
+    def setTarget(self, targetX, targetY):
+        self.__targetPosition = [targetX, targetY]
 
 
 class iRobotSensors:
@@ -112,18 +165,19 @@ class iRobotSensors:
                 pass
             elif pid == 19:
                 if ord(data[i])&0x80:
-                    self.__distance = -((ord(data[i])&0x7f)*256 + ord(data[i+1]))
+                    self.__distance = -(65536 - (ord(data[i])*256 + ord(data[i+1])))
                 else:
-                    self.__distance = (ord(data[i])&0x7f)*256 + ord(data[i+1])
-                print("Distance: " + str(self.__distance))
+                    self.__distance = ord(data[i])*256 + ord(data[i+1])
+#                 print("Distance: " + str(self.__distance))
 #                 self.__distance = ord(data[i])<<8 + ord(data[i+1]) 
                 i += 1
             elif pid == 20:
+#                 print(str(ord(data[i])) + str(ord(data[i+1])))
                 if ord(data[i])&0x80:
-                    self.__angle = -((ord(data[i])&0x7f)*256 + ord(data[i+1]))
+                    self.__angle = -(65536 - (ord(data[i])*256 + ord(data[i+1])))
                 else:
-                    self.__angle = (ord(data[i])&0x7f)*256 + ord(data[i+1])
-                print("Angle: " + str(self.__angle))
+                    self.__angle = ord(data[i])*256 + ord(data[i+1])
+#                 print("Angle: " + str(self.__angle))
 #                 self.__angle = ord(data[i])<<8 + ord(data[i+1]) 
                 i += 1
             elif pid == 21:
@@ -196,30 +250,45 @@ class iRobot():
     __currAngle = 0
     __currDistance = 0
     __task1 = 0
-    
-    def __init__(self, path):
+    __parent = 0
+    def __init__(self, parent, path):
         self.sensors = iRobotSensors()
 #       super(iRobot, self).__init__()
         self.__port = serial.Serial(path, baudrate=57600)
         self.__port.open()
         self.__packetLengthSemaphore = threading.Semaphore()
-        self.__task1 = iRobotTask1(self)
+        self.__parent = parent
+        
 
     def modeSafe(self):
-        self.__port.write("\x80\x83")
-#         self.__port.write(str([0x80, 0x83]))
+#         self.__port.write("\x80\x83")
+        self.__port.write(bytearray([0x80, 0x83]))
+        
     def modeFull(self):
-        self.__port.write("\x80\x84")
+#         self.__port.write("\x80\x84")
+        self.__port.write(bytearray([0x80, 0x84]))
+        
     def goCircle(self):
         self.__port.write("\x89\x00\xff\x00\xff")
-    def goStraight(self):
-        self.__port.write("\x91\x00\xff\x00\xff")
+        
+    def setWheelVel(self, left=0, right=0):
+#         self.__port.write("\x91\x00\xff\x00\xff")
+        left = int(left)
+        right = int(right)
+
+        leftMSB = (left&0xff00)>>8
+        leftLSB = (left&0xff)
+        
+        rightMSB = (right&0xff00)>>8
+        rightLSB = (right&0xff)
+        
+        self.__port.write(bytearray([0x91, leftMSB, leftLSB, rightMSB, rightLSB]))
+    
     def stop(self):
         self.__port.write("\x91\x00\x00\x00\x00")
         self.__port.write("\x80")
  
     def streamStart(self, requestedPacketsString):
-        self.goStraight()
         self.__port.write(requestedPacketsString)
 #         self.__port.write("\x94\x04\x07\x1B\x16\x17")
     def streamRead(self):
@@ -248,7 +317,8 @@ class iRobot():
 #                         continue
                     # checksum calculations END
                     self.sensors.parseStream(data)
-                    self.__task1.update()
+                    
+                    self.__parent.taskUpdate()
                 else :
                     self.__packetLength = 0
         print("iRobot Stream read thread Stopped")
@@ -256,7 +326,9 @@ class iRobot():
         self.__port.write("\x96\x00")
         self.__streamRunning = False
 
-
+#     def runTask(self, taskId):
+#         self.__currentTask = taskId
+        
     def __del__(self):
         self.streamStop()
         self.stop()
@@ -264,12 +336,15 @@ class iRobot():
      
 class mainWidget(QtGui.QWidget):
     __robot = 0
-    
+    __task1 = 0
+    __currentTask = 0
     def __init__(self):
         super(mainWidget, self).__init__()
         uic.loadUi('iRobotGUI.ui',self)
-        self.__robot = iRobot("/dev/rfcomm1")
+        self.__robot = iRobot(self, "/dev/rfcomm1")
+
 #         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
+        self.__task1 = iRobotTask1(self.__robot)
         self.show()
         
     def slotStart(self):
@@ -278,20 +353,29 @@ class mainWidget(QtGui.QWidget):
     def slotStop(self):
         self.__robot.streamStop()
         self.__robot.stop()
+        self.__currentTask = 0
         print("iRobot Control Disabled")
         
     def slotTask1Start(self):
-        
-        
         self.__robot.streamStart("\x94\x06\x07\x1B\x16\x17\x13\x14")    # bumps, wallSignal, voltage, current, distance, angle
         self.__threadComm = threading.Thread(target=self.__robot.streamRead)
         self.__threadComm.start()
     def slotTask1Stop(self):
         self.__robot.streamStop()
+    def slotTask1Go(self):
+        targetX = int(self.task1LineEditTargetX.text())
+        targetY = int(self.task1LineEditTargetY.text())
+        self.__task1.setTarget(targetX, targetY)
+        self.__currentTask = 1
+        
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
-             
-             
+    
+    def taskUpdate(self):
+        if (self.__currentTask == 1):
+            self.__task1.update()
+            pass
+      
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
 app.exec_()
