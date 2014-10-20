@@ -23,9 +23,27 @@ import threading
 import sys
 from math import *
 from time import sleep  
+import time
 from PyQt4 import QtCore, QtGui, uic
 from PyQt4.QtCore import QObject, pyqtSignal
 
+global shuttingDown
+shuttingDown = 0
+
+global TIMER
+TIMER = 0
+def hello():
+    print('hello')
+    
+
+class vector:
+    x=0
+    y=0
+    z=0
+    def __init__(self,x=0,y=0,z=0):
+        self.x = x
+        self.y = y
+        self.z = z
 
 class iRobotTask1:
     __robot = 0
@@ -33,62 +51,144 @@ class iRobotTask1:
     __currentPosition = 0
     __targetPosition = 0
     __rot = 0
+    __state = 0 #
     
     __WHEEL_DISTANCE = 200.0 #mm
     def __init__(self, robot):
         self.__robot = robot
-        self.__currentPosition = [0,0]
-        self.__targetPosition = [0,0]
+        self.__currentPosition =[0.0,0.0]
+        self.__targetPosition = [0.0,0.0]
+        self.__currentAngle = 0.0
         
-    def update(self):
-        self.positionCalculate()
-             
-        dist = sqrt((self.__currentPosition[0]-self.__targetPosition[0])**2 
-                + (self.__currentPosition[1]-self.__targetPosition[1])**2)
+    def update(self, dt, distance, angle):
         
-        if (dist < 50):
-            self.__robot.setWheelVel(0, 0)
+        #calculate odometry = f(q, alpha)
+        self.positionCalculate(distance, angle)
+        
+        dy = self.__targetPosition[1] - self.__currentPosition[1]
+        dx = self.__targetPosition[0] - self.__currentPosition[0]
+        print('HELLOjasouidhasuiodhasuidhausidhaiusdh'+str(degrees(atan2(dy, dx))))
+        xi = atan2(dy, dx) - self.__currentAngle
+        if (xi<-pi):
+            xi += 2*pi
+        elif (xi>pi):
+            xi -= 2*pi
+#         xi = 1
+        norm = sqrt(dx**2 + dy**2)
+#         norm = 100
+        print('TASK1 UPDATE: '+str(dx)+' '+str(dy)+' '+str(degrees(xi))+' '+str(norm)+' '+str(degrees(self.__currentAngle)))
+        
+        if (norm > 50):
+            
+#             self.__robot.setWheelVel(300, -300)
+            if (abs(xi) > radians(5)):
+                # Rotation phase
+                if (xi>pi):
+                    xi-=pi
+                elif(xi<-pi):
+                    xi+=pi    
+                vr = xi*self.__WHEEL_DISTANCE/(2*dt)
+                vl = -vr
+                self.__robot.setWheelVel(1*vr, 1*vl)
+                print('CORRECTING angle')
+            else:
+                gama = 2*radians(angle)
+                L = norm/(2*sin(radians(angle)))
+                t1 = 1/500*(gama*L+gama*self.__WHEEL_DISTANCE/2)
+                t2 = 1/500*(gama*L-gama*self.__WHEEL_DISTANCE/2)
+                
+                if (abs(t1)>abs(t2)):
+                    t = t1
+                else:
+                    t = t2
+                if (t < 0.2):
+                    t = 0.2
+                vl = (gama/t)*(L - self.__WHEEL_DISTANCE/2)
+                vr = (gama/t)*(L + self.__WHEEL_DISTANCE/2)
+                self.__robot.setWheelVel(vl,vr)
+#                 # Translation phase
+#                 pass
         else:
-            angleError = atan2(self.__targetPosition[0]-self.__currentPosition[0], 
-                                        self.__targetPosition[1]-self.__currentPosition[1])
+            self.__robot.setWheelVel(0, 0)
+            # regulation ok
+            pass
             
+#         #if (rotation ok)?
+#         if self.__state == 0:
+#             alpha = atan2(self.__targetPosition[1], self.__targetPosition[0])
+#             if (abs(alpha) > radians(5)):
+#                 self.__state = 1
+#             else:
+#                 self.__state = 2
+#         
+#         elif self.__state == 1:
+#             #Rotating phase
+#             
+#             self.positionCalculate()
+#             
+#             
+#             
+#         elif self.__state == 2:
+#             #Travelling phase
+#             pass
             
-            rot = (0.5*self.__WHEEL_DISTANCE)*(-self.__currentAngle+angleError)
-            vBase = 0.1*dist
-            
-            self.__currentAngle += (rot/self.__WHEEL_DISTANCE)*0.015
-            self.__currentAngle %= 2*pi
-            self.__currentPosition[0] += vBase*0.015*cos(self.__currentAngle)
-            self.__currentPosition[1] -= vBase*0.015*sin(self.__currentAngle)
-            
-            outL = vBase-rot/2
-            if (outL>500):
-                outL=500
-            elif (outL<-500):
-                outL=-500
-                
-            outR = vBase+rot/2
-            if (outR>500):
-                outR=500
-            elif (outR<-500):
-                outR=-500
-                
-            self.__robot.setWheelVel(outL, outR)
-            
-            print ('update '+str(degrees(angleError)) +' '+ str(rot))
-            print('STATE VARS: '+str(self.__currentPosition[0]) +' '+str(self.__currentPosition[1]) +' '+str(degrees(self.__currentAngle)) )
+
         
-    def positionCalculate(self):
-#         dDistance = self.__robot.sensors.distance()
-#         dAngle = self.__robot.sensors.angle()
+        
+    def positionCalculate(self, distance, angle):
+        # mm
+        q = distance
+        # rad 
+        alpha = radians(angle)
+        print('alpha: '+str(alpha))
+        gama = 2*alpha
+        
+        # TODO: Calculate odometry by RADIUS !
+#         if (gama):
+#             L = q/gama
+#             self.__currentPosition[0] -= L*sin(gama)
+#             self.__currentPosition[1] += L-L*cos(gama)
+#             self.__currentAngle += alpha
+#             
+#             angle = self.__currentAngle
+#             if (angle<-pi):
+#                 print('~~~~~~~~~~~~~~~~~~~~MINUS')
+#                 self.__currentAngle += 2*pi
+#             elif (angle>pi):
+#                 print('~~~~~~~~~~~~~~~~~~~~PLUS')
+#                 self.__currentAngle -= 2*pi
+# #             self.__currentAngle %= 2*pi
+#             
+#         else:
+        self.__currentPosition[0] += q*cos(self.__currentAngle)
+        self.__currentPosition[1] += q*sin(self.__currentAngle)
+        self.__currentAngle += alpha
+        
+        angle = self.__currentAngle
+        if (angle<-pi):
+            print('~~~~~~~~~~~~~~~~~~~~MINUS')
+            self.__currentAngle += 2*pi
+        elif (angle>pi):
+            print('~~~~~~~~~~~~~~~~~~~~PLUS')
+            self.__currentAngle -= 2*pi
+    
+        print('Current position: ', self.__currentPosition)
+        
+        
+        
+        
+        
+#         self.__currentAngle += dAngle
+        
+        # Calculate odometry
+        
+        # 
 #         self.__currentPosition[0] += dDistance*cos(radians(self.__currentAngle))
 #         self.__currentPosition[1] += dDistance*sin(radians(self.__currentAngle))
 #         self.__currentAngle += dAngle
 #         self.__currentAngle %= 360
 #         print(str(self.__currentPosition[0]) +' '+str(self.__currentPosition[1]) +' '+str(self.__currentAngle) )
-        pass
-    def init(self):
-        pass
+
     
     def setTarget(self, targetX, targetY):
         self.__targetPosition = [targetX, targetY]
@@ -244,12 +344,14 @@ class iRobotSensors:
 class iRobot():
     __port = 0
     __packetLength = 0
-    __streamRunning = 0
+#     __streamRunning = 0
     __packetLengthSemaphore = 0
     sensors = 0
     __currAngle = 0
     __currDistance = 0
     __task1 = 0
+    __timerStream = 0
+    __timerLastTime = 0
     __parent = 0
     def __init__(self, parent, path):
         self.sensors = iRobotSensors()
@@ -288,47 +390,82 @@ class iRobot():
         self.__port.write("\x91\x00\x00\x00\x00")
         self.__port.write("\x80")
  
-    def streamStart(self, requestedPacketsString):
-        self.__port.write(requestedPacketsString)
+    def streamStart(self):
+        print('timing hello()')
+#         self.__port.write(requestedPacketsString)
+        self.__timerLastTime = time.time()
+        threading.Timer(0.2, self.requestMoreData).start();
+#         global TIMER
+#         TIMER = threading.Timer(0.2, hello);
+#         print('timing hello() END')
 #         self.__port.write("\x94\x04\x07\x1B\x16\x17")
-    def streamRead(self):
-        self.__streamRunning = True
-        while self.__streamRunning:
-            if self.__packetLength == 0:    # get synchronized
-                sync = ord(self.__port.read(1))
-                if sync == 19:
-                    self.__packetLengthSemaphore.acquire()
-                    self.__packetLength = ord(self.__port.read(1))
-                    if (self.__packetLength != 0):
-                        trash = self.__port.read(self.__packetLength+1)
-                    self.__packetLengthSemaphore.release()
-            elif self.__packetLength > 0:
-                sync = ord(self.__port.read(1))
-                if sync == 19:
-                    self.__packetLengthSemaphore.acquire()
-                    data = self.__port.read(self.__packetLength+2)
-                    self.__packetLengthSemaphore.release()
-                    # checksum calculations START
-#                     sum = 0
-#                     for i in range(0, len(data)):
-#                         sum += ord(data[i])
-#                     if sum&(0xff) != 0:     # bad checksum
-#                         self.__packetLength = 0
-#                         continue
-                    # checksum calculations END
-                    self.sensors.parseStream(data)
-                    
-                    self.__parent.taskUpdate()
-                else :
-                    self.__packetLength = 0
-        print("iRobot Stream read thread Stopped")
+    
+    
     def streamStop(self):
-        self.__port.write("\x96\x00")
-        self.__streamRunning = False
+        pass
+#         try:
+#             self.__port.write("\x96\x00")
+#         except:
+#             pass
+#         self.__streamRunning = False
+#         global shuttingDown
+#         shuttingDown = 1
 
 #     def runTask(self, taskId):
 #         self.__currentTask = taskId
+
+    # Thread
+    def streamRead(self):
+#         self.__streamRunning = True
+        global shuttingDown
+        while not shuttingDown:
+            try:
+                print('READING OUT VALUES!')
+#                 sync = ord(self.__port.read(1))
+#                 if sync == 19:
+                data = self.__port.read(4)
+                print(str(ord(data[0])))
+                print(str(ord(data[1])))
+                print(str(ord(data[2])))
+                print(str(ord(data[3])))
+
+
+                # Do ti like angle!
+                if ord(data[0])&0x80:
+                    self.sensors.__distance = -(65536 - (ord(data[0])*256 + ord(data[1])))
+                else:
+                    self.sensors.__distance = ord(data[0])*256 + ord(data[1])
+                print("Distance: " + str(self.sensors.__distance)) 
+
+                angle = ord(data[2])*256 + ord(data[3])
+                if angle>=32768:
+                    self.sensors.__angle = angle - 65536
+                else:
+                    self.sensors.__angle = angle
+                    
+                print("Angle: " + str(self.sensors.__angle))
+                
+#                 self.sensors.parseStream(bytearray(0x06,0x13,data[0],data[1],0x14,data[2],data[3]))
+                # Calculate dT
+                curr_time = time.time();
+                dt = curr_time - self.__timerLastTime;
+                self.__timerLastTime = curr_time
+                
+                print('DAFUQMEGA')
+                self.__parent.taskUpdate(dt, self.sensors.__distance, self.sensors.__angle)
+                
+            except:
+                self.streamStop()
+        print("iRobot Stream read thread Stopped")
+    # Timer   
+    def requestMoreData(self):
+        print('request more data')
+        self.__port.write(bytearray([0x95, 0x02, 0x13, 0x14]))
         
+        global shuttingDown
+        if not shuttingDown:
+            threading.Timer(0.2, self.requestMoreData).start();
+            
     def __del__(self):
         self.streamStop()
         self.stop()
@@ -338,10 +475,13 @@ class mainWidget(QtGui.QWidget):
     __robot = 0
     __task1 = 0
     __currentTask = 0
+    
+
     def __init__(self):
         super(mainWidget, self).__init__()
+        
         uic.loadUi('iRobotGUI.ui',self)
-        self.__robot = iRobot(self, "/dev/rfcomm1")
+        self.__robot = iRobot(self, "/dev/rfcomm0")
 
 #         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
         self.__task1 = iRobotTask1(self.__robot)
@@ -349,33 +489,60 @@ class mainWidget(QtGui.QWidget):
         
     def slotStart(self):
         self.__robot.modeFull()
+        global shuttingDown
+        shuttingDown = 0
         print("iRobot Control Enabled")
     def slotStop(self):
         self.__robot.streamStop()
         self.__robot.stop()
         self.__currentTask = 0
+        global shuttingDown
+        shuttingDown = 1
         print("iRobot Control Disabled")
         
     def slotTask1Start(self):
-        self.__robot.streamStart("\x94\x06\x07\x1B\x16\x17\x13\x14")    # bumps, wallSignal, voltage, current, distance, angle
-        self.__threadComm = threading.Thread(target=self.__robot.streamRead)
+        self.__robot.streamStart() # initialize timer for request more data
+
+        self.__threadComm = threading.Thread(target=self.__robot.streamRead) # initialize reading stream
         self.__threadComm.start()
     def slotTask1Stop(self):
         self.__robot.streamStop()
     def slotTask1Go(self):
+#         global timerStream
+        self.__timerLastTime = time.time()
+#         __timerStream = threading.Timer(0.5, self.__robot.requestMoreData);
+#         __timerStream.start()
         targetX = int(self.task1LineEditTargetX.text())
         targetY = int(self.task1LineEditTargetY.text())
         self.__task1.setTarget(targetX, targetY)
         self.__currentTask = 1
+
         
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
     
-    def taskUpdate(self):
+
+    def taskUpdate(self, dt, distance, angle):
+        global shuttingDown
+        # TODO:  Get angle and distance
+        print('task update')
         if (self.__currentTask == 1):
-            self.__task1.update()
+            print('task update 1')
+            self.__task1.update(dt, distance, angle)
+            
             pass
-      
+#         print('ahoj')
+#         curr_time = time.time();
+#         dt = curr_time - self.__timerLastTime;
+#         self.__timerLastTime = curr_time
+#         if not shuttingDown:
+#             self.__timerStream.interval = 0.2
+#             self.__timerStream.run()
+            
+
+
+# timerStream = 0
+
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
 app.exec_()
