@@ -61,6 +61,8 @@ class iRobotTask1:
             if (self.__robot.positioning.targetOK()):
                 self.__state += 1
                 
+        self.__robot.positioning.regulate()
+                
 class iRobotTask2:
     __robot = 0
     __state = 0
@@ -109,8 +111,117 @@ class iRobotTask2:
                 self.__spX = AREAHEIGHT
                 self.__robot.positioning.setTarget(self.__spX, self.__spY)
                 self.__state = 2
+                
+        self.__robot.positioning.regulate()
             
+class iRobotTask3:
+    __robot = 0
+    __state = 0
+    __lastCalculateTime = 0
+    __STEP = 150
+    def __init__(self, robot):
+        self.__robot = robot
+        self.__state = 0
+        self.__target = [0,0]
 
+    def reset(self):
+        self.__state = 0
+        
+    def setTarget(self, x, y):
+        self.__target = [x, y]
+        
+    def update(self):
+        bl = self.__robot.sensors.bumpLeft()
+        br = self.__robot.sensors.bumpRight()
+        state = self.__state
+        [cx, cy] = self.__robot.positioning.getPosition()
+#         cx = 0
+#         cy = 0
+        ca = self.__robot.positioning.getAngle()
+        wall = self.__robot.sensors.wallSignal()
+#         wall=0
+        print ('state!!!!' + str(state))
+        if (state == 0):
+            if (bl and br):
+                self.__state = 11           
+                self.__robot.setWheelVel(-50, -50)
+#                 self.__robot.positioning.setTarget(cx, cy)
+                print ('nulujem rychlost')
+                self.__lastCalculateTime = self.__robot.positioning.getLastCalculateTime()
+            elif (bl):
+                self.__state = 21
+                self.__robot.setWheelVel(-50, -50)
+#                 self.__robot.positioning.setTarget(cx, cy)
+                self.__lastCalculateTime = self.__robot.positioning.getLastCalculateTime()
+            elif (br):
+                self.__state = 31
+                self.__robot.setWheelVel(-50, -50)
+#                 self.__robot.positioning.setTarget(cx, cy)
+                self.__lastCalculateTime = self.__robot.positioning.getLastCalculateTime()
+            else:
+                self.__robot.positioning.setTarget(self.__target[0], self.__target[1])
+                self.__robot.positioning.regulate()
+        elif (state == 11):
+            # turn left + 100mm
+            if (self.__lastCalculateTime +0.5 < self.__robot.positioning.getLastCalculateTime()):
+                self.__state = 12
+
+                uhol = radians(90)
+                tx = cx + self.__STEP*cos(ca+uhol)
+                ty = cy + self.__STEP*sin(ca+uhol)
+                
+                self.__robot.positioning.setTarget(tx,ty)
+                
+        elif (state == 12):
+            if (self.__robot.positioning.targetOK()):
+                print ('target ok')
+                if (wall > 10):
+                    tx = cx + self.__STEP * cos(ca)
+                    ty = cy + self.__STEP * sin(ca)
+                    self.__robot.positioning.setTarget(tx,ty)
+                else:
+                    # CHOD NA CIEL
+                    self.__state = 0
+                    self.__robot.positioning.setTarget(self.__target[0], self.__target[1])
+            else:
+                self.__robot.positioning.regulate()
+        elif (state == 21):
+            if (self.__lastCalculateTime +0.5 < self.__robot.positioning.getLastCalculateTime()):
+                self.__state = 32
+#                 tx = cx - 100*sin(ca)
+#                 ty = cy + 100*cos(ca)
+                uhol = radians(135)
+                tx = cx + self.__STEP*cos(ca+uhol)
+                ty = cy + self.__STEP*sin(ca+uhol)
+                self.__robot.positioning.setTarget(tx,ty)
+            
+        elif (state == 31):
+            if (self.__lastCalculateTime +0.5 < self.__robot.positioning.getLastCalculateTime()):
+                self.__state = 32
+#                 tx = cx - 100*sin(ca)
+#                 ty = cy + 100*cos(ca)
+                uhol = radians(45)
+                tx = cx + self.__STEP*cos(ca+uhol)
+                ty = cy + self.__STEP*sin(ca+uhol)
+                self.__robot.positioning.setTarget(tx,ty)
+                
+        elif (state == 32):
+            if (self.__robot.positioning.targetOK()):
+                
+                if (wall > 10):
+                    tx = cx + self.__STEP * cos(ca)
+                    ty = cy + self.__STEP * sin(ca)
+                    self.__robot.positioning.setTarget(tx,ty)
+                else:
+                    # CHOD NA CIEL
+                    self.__state = 0
+                    self.__robot.positioning.setTarget(self.__target[0], self.__target[1])
+            else:
+                self.__robot.positioning.regulate()
+   
+                
+        
+        
 class iRobotPositioning:
     __robot = 0
     __currentAngle = 0
@@ -120,6 +231,7 @@ class iRobotPositioning:
     __state = 0 #
     __targetReached = 0
     __WHEEL_DISTANCE = 200.0 #mm
+    __lastCalculateTime = 0
     def __init__(self, robot):
         self.__robot = robot
         self.__currentPosition =[0.0,0.0]
@@ -127,7 +239,7 @@ class iRobotPositioning:
         self.__currentAngle = 0.0
         self.__targetReached = 0
         
-    def regulate(self, dt):
+    def regulate(self):
         
 #         #calculate odometry = f(q, alpha)
 #         self.positionCalculate(distance, angle)
@@ -135,7 +247,6 @@ class iRobotPositioning:
         angle = self.__robot.sensors.angle()
         dy = self.__targetPosition[1] - self.__currentPosition[1]
         dx = self.__targetPosition[0] - self.__currentPosition[0]
-        print('HELLOjasouidhasuiodhasuidhausidhaiusdh'+str(degrees(atan2(dy, dx))))
         
         # Error between desired angle and current angle
         xi = atan2(dy, dx) - self.__currentAngle
@@ -147,12 +258,11 @@ class iRobotPositioning:
             xi -= 2*pi
 
 #         print('TASK1 UPDATE: '+str(dx)+' '+str(dy)+' '+str(degrees(xi))+' '+str(degrees(self.__currentAngle)))
-        print('DT: '+str(dt))
         if (not self.targetOK()):
             if (abs(xi) > radians(5)):
                 # Rotation phase
                 
-                vr = 100*xi+50*copysign(1,xi) #*self.__WHEEL_DISTANCE/(2*dt)
+                vr = 100*xi+50*copysign(1,xi)
                 vl = -vr
                 self.__robot.setWheelVel(vr, vl)
                 print('CORRECTING angle')
@@ -183,8 +293,13 @@ class iRobotPositioning:
             self.__currentAngle += 2*pi
         elif (angle>pi):
             self.__currentAngle -= 2*pi
-    
+        
+        self.__lastCalculateTime = time.time()
+        
         print('Current position: ', self.__currentPosition)
+
+    def getLastCalculateTime(self):
+        return self.__lastCalculateTime
     
     def setTarget(self, targetX, targetY):
         self.__targetPosition = [targetX, targetY]
@@ -198,6 +313,11 @@ class iRobotPositioning:
             return 1
         else:
             return 0
+        
+    def getPosition(self):
+        return self.__currentPosition
+    def getAngle(self):
+        return self.__currentAngle
 
 
 class iRobotSensors:
@@ -225,11 +345,11 @@ class iRobotSensors:
     def angle(self):
         return self.__angle
     def voltage(self):
-        return self.__voltage()
+        return self.__voltage
     def current(self):
-        return self.__current()
+        return self.__current
     def wallSignal(self):
-        return self.__wallSignal()
+        return self.__wallSignal
     
     # byte 0: LENGTH
     def parse(self, id, data):
@@ -237,9 +357,10 @@ class iRobotSensors:
         pid = id
          
         if pid == 7:
-#             self.__bumpRight = ord(data[i])&(0x01)
-#             self.__bumpLeft = (ord(data[i])&(0x02))>>1
-            # print("Bump Left: " + str(self.__bumpLeft) + " Bump Right: " + str(self.__bumpRight()))
+            print(str(data[0]))
+            self.__bumpRight = int(data[0]&(0x01))
+            self.__bumpLeft = int(data[0]&(0x02))>>1
+            print("Bump Left: " + str(self.bumpLeft()) + " Bump Right: " + str(self.bumpRight()))
             pass
         elif pid == 8:
 #             __wall = ord(data[i])
@@ -301,8 +422,8 @@ class iRobotSensors:
         elif pid == 27:
 #                 self.valueChanged.emit()
             
-#             self.__wallSignal = ord(data[i])<<8 + ord(data[i+1])
-            # print("Wall signal: " + str(self.__wallSignal)) 
+            self.__wallSignal = data[0]*256 + data[1]
+            print("\t\t\t\tWall signal: " + str(self.__wallSignal)) 
             pass
         elif pid == 28:
             pass
@@ -366,12 +487,15 @@ class iRobot():
     __leftWheelVelTarget = 0
     __rightWheelVelTarget = 0
     
+    __requestDataSelection = 0
+    __lastOdometryTime = 0
     __prescaler = 0
     def __init__(self, parent, path):
         self.sensors = iRobotSensors()
 
         self.__port = serial.Serial(path, baudrate=57600)
         self.__port.open()
+        self.__port.flushInput()
         self.__packetLengthSemaphore = threading.Semaphore()
         self.__parent = parent
         self.__leftWheelVelLP = lowPass(0)
@@ -415,9 +539,9 @@ class iRobot():
         now = time.time()
         self.__timerLastTime = now
         self.__timerLastTimeLowPass = now
-        self.__prescaler = 10
+        self.__prescaler = 0
         self.positioning.setTarget(0, 0)
-        threading.Timer(0.2, self.requestMoreData).start(); 
+        threading.Timer(0.04, self.requestMoreData).start(); 
     
     def streamStop(self):
         pass
@@ -427,22 +551,33 @@ class iRobot():
         global shuttingDown
         while not shuttingDown:
             try:
-                print('READING OUT VALUES!')
 
-                data = self.__port.read(4)
                 
-                self.sensors.parse(0x13, bytearray([ord(data[0]), ord(data[1])]))
-                self.sensors.parse(0x14, bytearray([ord(data[2]), ord(data[3])]))
+                if (self.__requestDataSelection == 1):
+#                     print(':-o 1')
+                    data = self.__port.read(7)
+#                     print('READING OUT VALUES! 1')
+                    self.sensors.parse(0x13, bytearray([ord(data[0]), ord(data[1])]))
+                    self.sensors.parse(0x14, bytearray([ord(data[2]), ord(data[3])]))
+                    self.sensors.parse(0x07, bytearray([ord(data[4])]))
+                    self.sensors.parse(0x1B, bytearray([ord(data[5]), ord(data[6])]))
+                    self.positioning.positionCalculate()
+                    self.__requestDataSelection = 0
+                elif (self.__requestDataSelection == 2):
+#                     print(':-o 2')
+                    data = self.__port.read(3)
+#                     print('READING OUT VALUES! 2' + str(ord(data[0])))
+                    self.sensors.parse(0x07, bytearray([ord(data[0])]))
+                    self.sensors.parse(0x1B, bytearray([ord(data[1]), ord(data[2])]))
+                    self.__requestDataSelection = 0
+                else: 
+                    continue
 #                 self.sensors.parseStream(bytearray(0x06,0x13,data[0],data[1],0x14,data[2],data[3]))
-                # Calculate dT
-                curr_time = time.time();
-                dt = curr_time - self.__timerLastTime;
-                self.__timerLastTime = curr_time
+
                 
-                self.positioning.positionCalculate()
-                self.positioning.regulate(dt)
                 
-                self.__parent.taskUpdate(dt)
+                
+                self.__parent.taskUpdate()
                 
             except:
                 self.streamStop()
@@ -452,16 +587,30 @@ class iRobot():
         # Send WheelVelocity
         
 #         self.sendWheelVel()
-#         if (self.__prescaler <= 0):
-#             self.__prescaler = 10
+        if (self.__lastOdometryTime >= 0.2):
+            self.__lastOdometryTime -= 0.2
             # Prescaler for 200ms
-        print('request more data')
-        self.__port.write(bytearray([0x95, 0x02, 0x13, 0x14]))
+            print('request more data')
+            if (self.__requestDataSelection == 0):
+                self.__requestDataSelection = 1
+                self.__port.write(bytearray([0x95, 0x04, 0x13, 0x14, 0x07, 0x1B]))
+        else:
+            # Prescaler for 40ms
+            print('HUMP & BUMP')
+            if (self.__requestDataSelection == 0):
+                self.__requestDataSelection = 2
+                self.__port.write(bytearray([0x95, 0x02, 0x07, 0x1B]))
+            self.__prescaler -= 1
+
+        
         global shuttingDown
         if not shuttingDown:
-            threading.Timer(0.2, self.requestMoreData).start();
-#         else:
-#             self.__prescaler -= 1
+                # Calculate dT
+            curr_time = time.time();
+            dt = curr_time - self.__timerLastTime;
+            self.__timerLastTime = curr_time
+            self.__lastOdometryTime += dt
+            threading.Timer(0.04, self.requestMoreData).start();
             
           
             
@@ -474,6 +623,7 @@ class mainWidget(QtGui.QWidget):
     robot = 0
     __task1 = 0
     __task2 = 0
+    __task3 = 0
     __currentTask = 0
     
 
@@ -481,11 +631,12 @@ class mainWidget(QtGui.QWidget):
         super(mainWidget, self).__init__()
         
         uic.loadUi('iRobotGUI.ui',self)
-        self.robot = iRobot(self, "/dev/rfcomm3")
+        self.robot = iRobot(self, "/dev/rfcomm0")
 
 #         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
         self.__task1 = iRobotTask1(self.robot)
         self.__task2 = iRobotTask2(self.robot)
+        self.__task3 = iRobotTask3(self.robot)
         self.show()
         
     def slotStart(self):
@@ -520,11 +671,19 @@ class mainWidget(QtGui.QWidget):
         self.__task2.reset()
         self.__currentTask = 2
         
+    def slotTask3Go(self):
+        self.__timerLastTime = time.time()
+        self.__task3.reset()
+        tx = int(self.task1LineEditTargetX.text())
+        ty = int(self.task1LineEditTargetY.text())
+        self.__task3.setTarget(tx, ty)
+        self.__currentTask = 3
+        
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
     
 
-    def taskUpdate(self, dt):
+    def taskUpdate(self):
         global shuttingDown
         # TODO:  Get angle and distance
         print('task regulate')
@@ -533,7 +692,10 @@ class mainWidget(QtGui.QWidget):
             self.__task1.update()
         elif (self.__currentTask == 2):
             print('task regulate 2')
-            self.__task2.update()        
+            self.__task2.update()
+        elif (self.__currentTask == 3):
+            print('task regulate 3')
+            self.__task3.update()             
 
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
