@@ -1432,6 +1432,19 @@
     <string>START TASK 2 (cleaning)</string>
    </property>
   </widget>
+  <widget class="QPushButton" name="buttonTask5Go">
+   <property name="geometry">
+    <rect>
+     <x>10</x>
+     <y>110</y>
+     <width>181</width>
+     <height>25</height>
+    </rect>
+   </property>
+   <property name="text">
+    <string>START TASK 5 (DOCK)</string>
+   </property>
+  </widget>
  </widget>
  <resources/>
  <connections>
@@ -1547,6 +1560,22 @@
     </hint>
    </hints>
   </connection>
+  <connection>
+   <sender>buttonTask5Go</sender>
+   <signal>clicked()</signal>
+   <receiver>Form</receiver>
+   <slot>slotTask5Go()</slot>
+   <hints>
+    <hint type="sourcelabel">
+     <x>100</x>
+     <y>122</y>
+    </hint>
+    <hint type="destinationlabel">
+     <x>286</x>
+     <y>76</y>
+    </hint>
+   </hints>
+  </connection>
  </connections>
  <slots>
   <slot>slotStart()</slot>
@@ -1556,5 +1585,6 @@
   <slot>slotTask2Go()</slot>
   <slot>slotTask3Go()</slot>
   <slot>slotTask4Go()</slot>
+  <slot>slotTask5Go()</slot>
  </slots>
 </ui>

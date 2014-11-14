@@ -344,8 +344,157 @@ class iRobotTask4:
                 self.__state = 3
             self.__robot.positioning.goStraight()
 
-         
+
+class iRobotTask5:
+    __robot = 0
+    __state = 0
+    __R_last = 0
+    __G_last = 0
+    __F_last = 0
+    __posIncoming = 0
+    def __init__(self, robot):
+        self.__robot = robot
+        self.__state = 0
+        self.__posIncoming = [0,0]
+
+    def reset(self):
+        self.__state = 0
+        self.__navState = 0
+        self.__regulate = 0
+        self.__R_last = 0
+        self.__G_last = 0
+        self.__F_last = 0
+        self.__countR = 0
+        self.__countG = 0
+        self.__countF = 0
+        self.__posIncoming = [0,0]
+        
+    def __parseIrRed(self, irbyte):
+        if (irbyte == 248 or irbyte == 252 or irbyte == 250 or irbyte == 254):
+            return 1
+        else:
+            return 0
+    def __parseIrGreen(self, irbyte):
+        if (irbyte == 244 or irbyte == 252 or irbyte == 246 or irbyte == 254):
+            return 1
+        else:
+            return 0
+    def __parseIrForce(self, irbyte):
+        if (irbyte == 242 or irbyte == 250 or irbyte == 246 or irbyte == 254):
+            return 1
+        else:
+            return 0
+        
+    # stavy: 
+    def __navigationControl(self, R, G, F, R_last, G_last, F_last, currPos):
+        print ('nehehe X1')
+        if (self.__regulate == 0):
+            if (R and G):
+                return 1
             
+            if ((not R and R_last) or (not G and G_last) or (not(G or R))):
+                if (self.__navState == 0):
+                    tmpWP = [(currPos[0] + self.__posIncoming[0])/2,
+                                       (currPos[1] + self.__posIncoming[1])/2]
+                    diffX = currPos[0] - self.__posIncoming[0]
+                    diffY = currPos[1] - self.__posIncoming[1]
+                    self.__vectorToOutcoming = atan2(diffY, diffX)
+                    self.__waypoint = [cos(self.__vectorToOutcoming)*12 + tmpWP[0], sin(self.__vectorToOutcoming)*12+tmpWP[1]]
+                self.__robot.positioning.setTarget(self.__waypoint[0], self.__waypoint[1])
+                self.__navState = self.__navState + 1
+                self.__regulate = 1
+        
+        
+        
+        if (self.__regulate == 1):#move
+            if (self.__robot.positioning.targetOK()):
+                self.__regulate = 2
+            else:
+                self.__robot.positioning.regulate()
+        elif (self.__regulate == 2):#rot
+            
+            if (self.__navState == 1):
+                des = self.__vectorToOutcoming + radians(-90)
+            elif (self.__navState == 2):
+                des = self.__vectorToOutcoming + radians(90)
+            elif (self.__navState == 3):
+                des = self.__vectorToOutcoming + radians(135)
+            elif (self.__navState == 4):
+                des = self.__vectorToOutcoming + radians(-45)
+            elif (self.__navState == 5):
+                des = self.__vectorToOutcoming + radians(-135)
+            elif (self.__navState == 6):
+                des = self.__vectorToOutcoming + radians(45)
+                
+            if (self.__robot.positioning.getAngleError(des) > radians(5)):
+                self.__robot.positioning.regulateAngle(des)
+            else:
+                # skoc
+                self.__regulate = 0
+#                 if (R or G):
+                self.__robot.setWheelVel(60, 60)
+#                 else:
+#                     self.__robot.setWheelVel(0, 0)
+            
+            
+        
+    def update(self):
+        irbyte = self.__robot.sensors.IRByte()
+        R_last = self.__R_last
+        G_last = self.__G_last
+        F_last = self.__F_last
+        R = self.__parseIrRed(irbyte)
+        G = self.__parseIrGreen(irbyte)
+        F = self.__parseIrForce(irbyte)
+        
+        
+        if (R != R_last):
+            if (self.__countR < 10):
+                R = R_last
+                self.__countR = self.__countR + 1
+        else:
+            self.__countR = 0
+            
+        if (G != G_last):
+            if (self.__countG < 10):
+                G = G_last
+                self.__countG = self.__countG + 1
+        else:
+            self.__countG = 0
+            
+        if (F != F_last):
+            if (self.__countF < 10):
+                F = F_last
+                self.__countF = self.__countF + 1
+        else:
+            self.__countF = 0
+            
+        
+            
+        currPos = self.__robot.positioning.getPosition()
+        currAngle = self.__robot.positioning.getAngle()
+        
+        if (self.__state == 0):
+            if ((R and not R_last) or (G and not G_last)):
+                print ('\t\t\t\t STAF 0')
+                self.__posIncoming = [currPos[0],currPos[1]]
+                print (self.__posIncoming)
+                self.__state = 1
+                
+            self.__robot.setWheelVel(100, 100)
+            
+        elif (self.__state == 1):         
+            if (self.__navigationControl(R, G, F, R_last, G_last, F_last, currPos)):
+                # mame R and G
+                self.__robot.setWheelVel(0,0)
+                self.__state = 2
+            
+                print ('\t\t\t\t JUPPI')
+                
+#             self.__robot.positioning.goStraight()
+        self.__R_last = R
+        self.__G_last = G
+        self.__F_last = F
 class iRobotPositioning:
     __robot = 0
     __currentAngle = 0
@@ -412,7 +561,19 @@ class iRobotPositioning:
         vr = 100*xi+50*copysign(1,xi)
         vl = -vr
         self.__robot.setWheelVel(vr, vl)
-        
+
+    
+    def cureAngleDisease(self, xi):
+        if (xi<-pi):
+            xi += 2*pi
+        elif (xi>pi):
+            xi -= 2*pi
+        return xi
+    
+    def getAngleError(self, desiredAngle):
+        xi = desiredAngle - self.__currentAngle
+        xi = self.cureAngleDisease(xi)          
+        return abs(xi)
     def getCurrentAngle(self):
         return self.__currentAngle
         
@@ -495,15 +656,14 @@ class iRobotSensors:
         return self.__wallSignal
     
     # byte 0: LENGTH
-    def parse(self, id, data):
+    def parse(self, pid, data):
         # PACKET ID
-        pid = id
-         
+#         print("DATA: "+str(data[0]))
         if pid == 7:
-            print(str(data[0]))
+#             print(str(data[0]))
             self.__bumpRight = int(data[0]&(0x01))
             self.__bumpLeft = int(data[0]&(0x02))>>1
-            print("Bump Left: " + str(self.bumpLeft()) + " Bump Right: " + str(self.bumpRight()))
+#             print("Bump Left: " + str(self.bumpLeft()) + " Bump Right: " + str(self.bumpRight()))
             pass
         elif pid == 8:
 #             __wall = ord(data[i])
@@ -517,6 +677,9 @@ class iRobotSensors:
         elif pid == 12:
             pass
         elif pid == 13:
+#             print("Virtually virtual wall")
+            print("Virtual wall: "+str(data[0]))
+#             print("Virtually virtual wallX")
             pass
         elif pid == 14:
             pass
@@ -525,7 +688,8 @@ class iRobotSensors:
         elif pid == 16:
             pass
         elif pid == 17:
-#             self.__IRByte = ord(data[i])
+            self.__IRByte = data[0]
+            print("\t\t\t\t\t\t\t#### IRBYTE"+str(self.__IRByte))
             pass
         elif pid == 18:
             pass
@@ -566,7 +730,7 @@ class iRobotSensors:
 #                 self.valueChanged.emit()
             
             self.__wallSignal = data[0]*256 + data[1]
-            print("\t\t\t\tWall signal: " + str(self.__wallSignal)) 
+#             print("\t\t\t\tWall signal: " + str(self.__wallSignal)) 
             pass
         elif pid == 28:
             pass
@@ -698,21 +862,25 @@ class iRobot():
                 
                 if (self.__requestDataSelection == 1):
 #                     print(':-o 1')
-                    data = self.__port.read(7)
+                    data = self.__port.read(9)
 #                     print('READING OUT VALUES! 1')
                     self.sensors.parse(0x13, bytearray([ord(data[0]), ord(data[1])]))
                     self.sensors.parse(0x14, bytearray([ord(data[2]), ord(data[3])]))
                     self.sensors.parse(0x07, bytearray([ord(data[4])]))
                     self.sensors.parse(0x1B, bytearray([ord(data[5]), ord(data[6])]))
+                    self.sensors.parse(0x0D, bytearray([ord(data[7])]))
+                    self.sensors.parse(0x11, bytearray([ord(data[8])]))
                     self.positioning.positionCalculate()
                     self.__parent.taskUpdate()
                     self.__requestDataSelection = 0
                 elif (self.__requestDataSelection == 2):
 #                     print(':-o 2')
-                    data = self.__port.read(3)
+                    data = self.__port.read(5)
 #                     print('READING OUT VALUES! 2' + str(ord(data[0])))
                     self.sensors.parse(0x07, bytearray([ord(data[0])]))
                     self.sensors.parse(0x1B, bytearray([ord(data[1]), ord(data[2])]))
+                    self.sensors.parse(0x0D, bytearray([ord(data[3])]))
+                    self.sensors.parse(0x11, bytearray([ord(data[4])]))
                     self.__parent.taskUpdate()
                     self.__requestDataSelection = 0
                 else: 
@@ -738,13 +906,13 @@ class iRobot():
             print('request more data')
             if (self.__requestDataSelection == 0):
                 self.__requestDataSelection = 1
-                self.__port.write(bytearray([0x95, 0x04, 0x13, 0x14, 0x07, 0x1B]))
+                self.__port.write(bytearray([0x95, 0x06, 0x13, 0x14, 0x07, 0x1B, 0x0D, 0x11]))
         else:
             # Prescaler for 40ms
             print('HUMP & BUMP')
             if (self.__requestDataSelection == 0):
                 self.__requestDataSelection = 2
-                self.__port.write(bytearray([0x95, 0x02, 0x07, 0x1B]))
+                self.__port.write(bytearray([0x95, 0x04, 0x07, 0x1B, 0x0D, 0x11]))
             self.__prescaler -= 1
 
         
@@ -776,13 +944,14 @@ class mainWidget(QtGui.QWidget):
         super(mainWidget, self).__init__()
         
         uic.loadUi('iRobotGUI.ui',self)
-        self.robot = iRobot(self, "/dev/rfcomm1")
+        self.robot = iRobot(self, "/dev/rfcomm0")
 
 #         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
         self.__task1 = iRobotTask1(self.robot)
         self.__task2 = iRobotTask2(self.robot)
         self.__task3 = iRobotTask3(self.robot)
         self.__task4 = iRobotTask4(self.robot)
+        self.__task5 = iRobotTask5(self.robot)
         self.show()
         
     def slotStart(self):
@@ -833,6 +1002,12 @@ class mainWidget(QtGui.QWidget):
         self.robot.positioning.reinit()
         self.__task4.reset()
         self.__currentTask = 4
+    
+    def slotTask5Go(self):
+        self.__timerLastTime = time.time()
+#         self.robot.positioning.reinit()
+        self.__task5.reset()
+        self.__currentTask = 5
         
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
@@ -853,7 +1028,10 @@ class mainWidget(QtGui.QWidget):
             self.__task3.update()            
         elif (self.__currentTask == 4):
             print('task regulate 4')
-            self.__task4.update()   
+            self.__task4.update()  
+        elif (self.__currentTask == 5):
+            print('task regulate 5')
+            self.__task5.update()  
 
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
