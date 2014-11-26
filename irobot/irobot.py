@@ -21,11 +21,14 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 import serial
 import threading
 import sys
+
 from math import *
 from time import sleep  
 import time
-from PyQt4 import QtCore, QtGui, uic
+from PyQt4 import QtCore, QtGui, uic, Qt
 from PyQt4.QtCore import QObject, pyqtSignal
+from PyQt4.QtGui import *
+from PyQt4.Qt import QMutex, QEvent
 
 global shuttingDown
 shuttingDown = 0
@@ -495,6 +498,35 @@ class iRobotTask5:
         self.__R_last = R
         self.__G_last = G
         self.__F_last = F
+        
+class iRobotTask6:
+    __robot = 0
+    def __init__(self, robot):
+        self.__robot = robot
+        self.__state = 0
+
+    def reset(self):
+        self.__state = 0
+        
+    def update(self):
+        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~update: '+str(self.__robot.sensors.angle()))
+   
+        p = 1000
+        state = self.__state
+        if (state == 0):
+            self.__robot.positioning.setTarget(p, 0)
+        elif (state == 1):
+            self.__robot.positioning.setTarget(p, p)
+        elif (state == 2):
+            self.__robot.positioning.setTarget(0, p)
+        elif (state == 3):
+            self.__robot.positioning.setTarget(0, 0)
+            
+        if (self.__state < self.__MAXSTATES):
+            if (self.__robot.positioning.targetOK()):
+                self.__state += 1
+                
+        self.__robot.positioning.regulate()
 class iRobotPositioning:
     __robot = 0
     __currentAngle = 0
@@ -634,6 +666,12 @@ class iRobotSensors:
     __voltage = 0
     __current = 0
     __wallSignal = 0
+    __rightWheelOC = 0
+    __leftWheelOC = 0
+    __temperature = 0
+    __charge = 0
+    __capacity = 0
+    
     valueChanged = pyqtSignal()
     
     def bumpLeft(self):
@@ -653,8 +691,18 @@ class iRobotSensors:
     def current(self):
         return self.__current
     def wallSignal(self):
-        return self.__wallSignal
-    
+        return int(self.__wallSignal)
+    def leftWheelOC(self):
+        return self.__leftWheelOC
+    def rightWheelOC(self):
+        return self.__rightWheelOC
+    def temperature(self):
+        return self.__temperature
+    def charge(self):
+        return self.__charge
+    def capacity(self):
+        return self.__capacity
+
     # byte 0: LENGTH
     def parse(self, pid, data):
         # PACKET ID
@@ -682,7 +730,8 @@ class iRobotSensors:
 #             print("Virtually virtual wallX")
             pass
         elif pid == 14:
-            pass
+            self.__rightWheelOC = int(data[0]&(8))
+            self.__leftWheelOC = int(data[0]&(16))
         elif pid == 15:
             pass
         elif pid == 16:
@@ -710,22 +759,26 @@ class iRobotSensors:
         elif pid == 21:
             pass
         elif pid == 22:
-#             self.__voltage = ord(data[i])*256 + ord(data[i+1]) 
+            self.__voltage = data[0]*256 + data[1] 
 #                 print("Voltage: " + str(self.__voltage)) 
             pass
         elif pid == 23:
-#             if ord(data[i])&(0x80) != 0:    # negative current
-#                 self.__current = -1*((ord(data[i])&(0x7f))*256 + ord(data[i+1]))
-#             else:   # positive current
-#                 self.__current = ord(data[i])&(0x7f)*256 + ord(data[i+1])
-#                 print("Current: " + str(self.__current)) 
-            pass
+            current = data[0]*256 + data[1]
+            if current >= 32768:
+                self.__current = current - 65536
+            else:
+                self.__current = current
+
         elif pid == 24:
-            pass
+            temp = data[0]
+            if temp >= 128:
+                self.__temperature = temp - 256
+            else:
+                self.__temperature = temp
         elif pid == 25:
-            pass
+            self.__charge = data[0]*256 + data[1] 
         elif pid == 26:
-            pass
+            self.__capacity = data[0]*256 + data[1]
         elif pid == 27:
 #                 self.valueChanged.emit()
             
@@ -797,6 +850,7 @@ class iRobot():
     __requestDataSelection = 0
     __lastOdometryTime = 0
     __prescaler = 0
+    
     def __init__(self, parent, path):
         self.sensors = iRobotSensors()
 
@@ -812,6 +866,12 @@ class iRobot():
     def modeSafe(self):
 #         self.__port.write("\x80\x83")
         self.__port.write(bytearray([0x80, 0x83]))
+        
+    def actualLeftWheelVel(self):
+        return self.__leftWheelVelTarget
+    
+    def actualRightWheelVel(self):
+        return self.__rightWheelVelTarget
         
     def modeFull(self):
 #         self.__port.write("\x80\x84")
@@ -862,7 +922,7 @@ class iRobot():
                 
                 if (self.__requestDataSelection == 1):
 #                     print(':-o 1')
-                    data = self.__port.read(9)
+                    data = self.__port.read(19)
 #                     print('READING OUT VALUES! 1')
                     self.sensors.parse(0x13, bytearray([ord(data[0]), ord(data[1])]))
                     self.sensors.parse(0x14, bytearray([ord(data[2]), ord(data[3])]))
@@ -870,6 +930,12 @@ class iRobot():
                     self.sensors.parse(0x1B, bytearray([ord(data[5]), ord(data[6])]))
                     self.sensors.parse(0x0D, bytearray([ord(data[7])]))
                     self.sensors.parse(0x11, bytearray([ord(data[8])]))
+                    self.sensors.parse(0x0e, bytearray([ord(data[9])]))
+                    self.sensors.parse(0x16, bytearray([ord(data[10]), ord(data[11])]))
+                    self.sensors.parse(0x17, bytearray([ord(data[12]), ord(data[13])]))
+                    self.sensors.parse(0x18, bytearray([ord(data[14])]))
+                    self.sensors.parse(0x19, bytearray([ord(data[15]), ord(data[16])]))
+                    self.sensors.parse(0x1a, bytearray([ord(data[17]), ord(data[18])]))
                     self.positioning.positionCalculate()
                     self.__parent.taskUpdate()
                     self.__requestDataSelection = 0
@@ -906,7 +972,7 @@ class iRobot():
             print('request more data')
             if (self.__requestDataSelection == 0):
                 self.__requestDataSelection = 1
-                self.__port.write(bytearray([0x95, 0x06, 0x13, 0x14, 0x07, 0x1B, 0x0D, 0x11]))
+                self.__port.write(bytearray([0x95, 12, 0x13, 0x14, 0x07, 0x1B, 0x0D, 0x11, 0x0e, 0x16, 0x17, 0x18, 0x19, 0x1A]))
         else:
             # Prescaler for 40ms
             print('HUMP & BUMP')
@@ -934,25 +1000,47 @@ class iRobot():
      
 class mainWidget(QtGui.QWidget):
     robot = 0
-    __task1 = 0
-    __task2 = 0
-    __task3 = 0
     __currentTask = 0
+    trigger = pyqtSignal()
+    def rightWheelOvercurrent(self, on):
+        paleta = self.label_7.palette()
+        
+        if (on):            
+            paleta.setColor(self.label_7.backgroundRole(), QColor.fromRgbF(1, 0, 0, alpha=1))
+        else:
+            paleta.setColor(self.label_7.backgroundRole(), QColor.fromRgbF(0, 1, 0, alpha=1))
+        self.label_7.setPalette(paleta)
+        
+    def leftWheelOvercurrent(self, on):
+        paleta = self.label_9.palette()
+        
+        if (on):            
+            paleta.setColor(self.label_9.backgroundRole(), QColor.fromRgbF(1, 0, 0, alpha=1))
+        else:
+            paleta.setColor(self.label_9.backgroundRole(), QColor.fromRgbF(0, 1, 0, alpha=1))
+        self.label_9.setPalette(paleta)
     
-
     def __init__(self):
         super(mainWidget, self).__init__()
         
         uic.loadUi('iRobotGUI.ui',self)
         self.robot = iRobot(self, "/dev/rfcomm0")
+#         self.dial.setValue(500)
+        self.label_3.setPixmap(QPixmap("./irobotcreate.jpg"))
 
-#         self.__robot.sensors.valueChanged.connect(self.slotSensorsChanged)
         self.__task1 = iRobotTask1(self.robot)
         self.__task2 = iRobotTask2(self.robot)
         self.__task3 = iRobotTask3(self.robot)
         self.__task4 = iRobotTask4(self.robot)
         self.__task5 = iRobotTask5(self.robot)
+        self.__task6 = iRobotTask6(self.robot)
         self.show()
+        
+        self.eF = filterObj(self)
+        self.installEventFilter(self.eF)
+#         self.lineEdit_4.installEventFilter(self.eF)
+        
+        self.trigger.connect(self.guiUpdate)
         
     def slotStart(self):
         self.robot.modeFull()
@@ -969,7 +1057,6 @@ class mainWidget(QtGui.QWidget):
         
     def slotStreamStart(self):
         self.robot.streamStart() # initialize timer for request more data
-
         self.__threadComm = threading.Thread(target=self.robot.streamRead) # initialize reading stream
         self.__threadComm.start()
         
@@ -990,7 +1077,7 @@ class mainWidget(QtGui.QWidget):
         
     def slotTask3Go(self):
         self.__timerLastTime = time.time()
-        self.robot.positioning.reinit()
+#         self.robot.positioning.reinit()
         self.__task3.reset()
         tx = int(self.task1LineEditTargetX.text())
         ty = int(self.task1LineEditTargetY.text())
@@ -1008,15 +1095,36 @@ class mainWidget(QtGui.QWidget):
 #         self.robot.positioning.reinit()
         self.__task5.reset()
         self.__currentTask = 5
+    def slotTask6Go(self):
+#         self.__timerLastTime = time.time()
+#         self.robot.positioning.reinit()
+#         self.__task5.reset()
+        self.__currentTask = 6
         
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
     
-
+    def guiUpdate(self):
+        self.rightWheelOvercurrent(self.robot.sensors.rightWheelOC())
+        self.leftWheelOvercurrent(self.robot.sensors.leftWheelOC())
+        
+        self.dial.setValue(self.robot.actualRightWheelVel())
+        self.dial_2.setValue(self.robot.actualLeftWheelVel())
+        print(self.robot.sensors.wallSignal())
+        self.progressBar.setValue(self.robot.sensors.wallSignal())
+        self.progressBar_2.setValue(abs(self.robot.sensors.current()))
+        self.lineEdit.setText(Qt.QString.number(self.robot.sensors.voltage()))
+        self.lineEdit_2.setText(Qt.QString("%1/%2").arg(self.robot.sensors.charge()).arg(self.robot.sensors.capacity()))
+        self.lineEdit_3.setText(Qt.QString.number(self.robot.sensors.temperature()))
     def taskUpdate(self):
         global shuttingDown
         # TODO:  Get angle and distance
         print('task regulate')
+        
+        self.trigger.emit()
+
+        
+        
         if (self.__currentTask == 1):
             print('task regulate 1')
             self.__task1.update()
@@ -1032,6 +1140,29 @@ class mainWidget(QtGui.QWidget):
         elif (self.__currentTask == 5):
             print('task regulate 5')
             self.__task5.update()  
+        elif (self.__currentTask == 6):
+            print('task regulate 6')
+            self.__task6.update()  
+            
+
+class filterObj(QObject):
+    def __init__(self, windowObj):
+        QObject.__init__(self)
+        self.windowObj = windowObj
+
+    def eventFilter(self, obj, event):
+        if (event.type() == QEvent.KeyPress):
+            key = event.key()
+            print(key)
+#             if(key == 's'):
+#                 print('standard response')
+
+#             if key == 'f':
+#                 self.windowObj.test(obj)
+
+            return True
+        else:
+            return False          
 
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
