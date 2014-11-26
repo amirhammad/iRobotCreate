@@ -501,6 +501,7 @@ class iRobotTask5:
         
 class iRobotTask6:
     __robot = 0
+    __keyState = 0
     def __init__(self, robot):
         self.__robot = robot
         self.__state = 0
@@ -508,25 +509,37 @@ class iRobotTask6:
     def reset(self):
         self.__state = 0
         
+    def setKeyState(self, keyState):
+        self.__keyState = keyState
+        
     def update(self):
-        print('~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~update: '+str(self.__robot.sensors.angle()))
-   
-        p = 1000
-        state = self.__state
-        if (state == 0):
-            self.__robot.positioning.setTarget(p, 0)
-        elif (state == 1):
-            self.__robot.positioning.setTarget(p, p)
-        elif (state == 2):
-            self.__robot.positioning.setTarget(0, p)
-        elif (state == 3):
-            self.__robot.positioning.setTarget(0, 0)
+        baseSpeed = 200
+        baseRotation = 50
+        keyState = self.__keyState
+        # 1,  2     4     8
+        # Up, Down, Left, Right
+        outL = 0
+        outR = 0
+        if (keyState == 1):
+            outL = baseSpeed
+            outR = baseSpeed
+        elif (keyState == 2):
+            outL = -baseSpeed
+            outR = -baseSpeed
+        elif (keyState == 5):
+            outL = baseSpeed - baseRotation
+            outR = baseSpeed + baseRotation
+        elif (keyState == 6):
+            outL = -baseSpeed + baseRotation
+            outR = -baseSpeed - baseRotation
+        elif (keyState == 9):
+            outL = baseSpeed + baseRotation
+            outR = baseSpeed - baseRotation
+        elif (keyState == 10):
+            outL = -baseSpeed - baseRotation
+            outR = -baseSpeed + baseRotation
             
-        if (self.__state < self.__MAXSTATES):
-            if (self.__robot.positioning.targetOK()):
-                self.__state += 1
-                
-        self.__robot.positioning.regulate()
+        self.__robot.setWheelVel(outR,outL)
 class iRobotPositioning:
     __robot = 0
     __currentAngle = 0
@@ -997,7 +1010,41 @@ class iRobot():
         self.streamStop()
         self.stop()
         self.__port.close()
-     
+class CMButton(QtGui.QPushButton):
+    __keyState = 0
+    def __init__(self, arg):
+        super(CMButton, self).__init__(arg)
+        
+    def keyState(self):
+        return self.__keyState
+    def mPressed(self, key, state):
+         
+        if (not key.isAutoRepeat()):
+            k = key.key()
+            i = -1
+            if (k==QtCore.Qt.Key_Up):
+                i = 0
+            elif (k == QtCore.Qt.Key_Down):
+                i = 1
+            elif (k == QtCore.Qt.Key_Left):
+                i = 2
+            elif (k == QtCore.Qt.Key_Right):
+                i = 3
+            if (i >= 0):
+                if (state):
+                    self.__keyState |= (1<<i)
+                else:
+                    self.__keyState &= ~(1<<i)
+                print(self.keyState())
+                
+    def keyPressEvent(self, key):
+        self.mPressed(key, True);
+        key.accept()
+    
+    def keyReleaseEvent(self, key):
+        self.mPressed(key, False);
+        key.accept()
+
 class mainWidget(QtGui.QWidget):
     robot = 0
     __currentTask = 0
@@ -1024,7 +1071,7 @@ class mainWidget(QtGui.QWidget):
         super(mainWidget, self).__init__()
         
         uic.loadUi('iRobotGUI.ui',self)
-        self.robot = iRobot(self, "/dev/rfcomm0")
+#         self.robot = iRobot(self, "/dev/rfcomm0")
 #         self.dial.setValue(500)
         self.label_3.setPixmap(QPixmap("./irobotcreate.jpg"))
 
@@ -1034,13 +1081,16 @@ class mainWidget(QtGui.QWidget):
         self.__task4 = iRobotTask4(self.robot)
         self.__task5 = iRobotTask5(self.robot)
         self.__task6 = iRobotTask6(self.robot)
+
+        layout = self.layout()
+        self.arrowButton = CMButton("Press Me to start Manual Control")
+        layout.addWidget(self.arrowButton)
+        self.arrowButton.clicked.connect(self.slotTask6Go)
+        
         self.show()
         
-        self.eF = filterObj(self)
-        self.installEventFilter(self.eF)
-#         self.lineEdit_4.installEventFilter(self.eF)
-        
         self.trigger.connect(self.guiUpdate)
+        
         
     def slotStart(self):
         self.robot.modeFull()
@@ -1096,13 +1146,13 @@ class mainWidget(QtGui.QWidget):
         self.__task5.reset()
         self.__currentTask = 5
     def slotTask6Go(self):
-#         self.__timerLastTime = time.time()
-#         self.robot.positioning.reinit()
-#         self.__task5.reset()
+        self.__task6.reset()
         self.__currentTask = 6
         
     def slotSensorsChanged(self):
         print("iRobot Sensor data changed")
+    
+
     
     def guiUpdate(self):
         self.rightWheelOvercurrent(self.robot.sensors.rightWheelOC())
@@ -1142,28 +1192,9 @@ class mainWidget(QtGui.QWidget):
             self.__task5.update()  
         elif (self.__currentTask == 6):
             print('task regulate 6')
+            self.__task6.setKeyState(self.arrowButton.keyState())
             self.__task6.update()  
             
-
-class filterObj(QObject):
-    def __init__(self, windowObj):
-        QObject.__init__(self)
-        self.windowObj = windowObj
-
-    def eventFilter(self, obj, event):
-        if (event.type() == QEvent.KeyPress):
-            key = event.key()
-            print(key)
-#             if(key == 's'):
-#                 print('standard response')
-
-#             if key == 'f':
-#                 self.windowObj.test(obj)
-
-            return True
-        else:
-            return False          
-
 app = QtGui.QApplication(sys.argv)
 w = mainWidget()
 app.exec_()
