@@ -514,7 +514,7 @@ class iRobotTask6:
         
     def update(self):
         baseSpeed = 200
-        baseRotation = 50
+        baseRotation = 70
         keyState = self.__keyState
         # 1,  2     4     8
         # Up, Down, Left, Right
@@ -538,7 +538,13 @@ class iRobotTask6:
         elif (keyState == 10):
             outL = -baseSpeed - baseRotation
             outR = -baseSpeed + baseRotation
-            
+        elif (keyState == 4):
+            outL = - baseRotation
+            outR = + baseRotation
+        elif (keyState == 8):
+            outL = + baseRotation
+            outR = - baseRotation
+        
         self.__robot.setWheelVel(outR,outL)
 class iRobotPositioning:
     __robot = 0
@@ -586,7 +592,7 @@ class iRobotPositioning:
                 self.__robot.setWheelVel(vr, vl)
                 print('CORRECTING angle')
             else:               
-                self.__robot.setWheelVel(300,300)
+                self.__robot.setWheelVel(200,200)
         else:
             self.__robot.setWheelVel(0, 0)
             # regulation ok
@@ -685,6 +691,11 @@ class iRobotSensors:
     __charge = 0
     __capacity = 0
     
+    __cliffLeft = 0
+    __cliffFrontLeft = 0
+    __cliffFrontRight = 0
+    __cliffRight = 0
+    
     valueChanged = pyqtSignal()
     
     def bumpLeft(self):
@@ -715,7 +726,15 @@ class iRobotSensors:
         return self.__charge
     def capacity(self):
         return self.__capacity
-
+    def cliffLeft(self):
+        return self.__cliffLeft
+    def cliffFrontLeft(self):
+        return self.__cliffFrontLeft
+    def cliffFrontRight(self):
+        return self.__cliffFrontRight
+    def cliffRight(self):
+        return self.__cliffRight
+    
     # byte 0: LENGTH
     def parse(self, pid, data):
         # PACKET ID
@@ -730,13 +749,13 @@ class iRobotSensors:
 #             __wall = ord(data[i])
             pass
         elif pid == 9:
-            pass
+            self.__cliffLeft = int(data[0]&(0x01))
         elif pid == 10:
-            pass
+            self.__cliffFrontLeft = int(data[0]&(0x01))
         elif pid == 11:
-            pass
+            self.__cliffFrontRight = int(data[0]&(0x01))
         elif pid == 12:
-            pass
+            self.__cliffRight = int(data[0]&(0x01))
         elif pid == 13:
 #             print("Virtually virtual wall")
             print("Virtual wall: "+str(data[0]))
@@ -935,7 +954,7 @@ class iRobot():
                 
                 if (self.__requestDataSelection == 1):
 #                     print(':-o 1')
-                    data = self.__port.read(19)
+                    data = self.__port.read(23)
 #                     print('READING OUT VALUES! 1')
                     self.sensors.parse(0x13, bytearray([ord(data[0]), ord(data[1])]))
                     self.sensors.parse(0x14, bytearray([ord(data[2]), ord(data[3])]))
@@ -949,17 +968,25 @@ class iRobot():
                     self.sensors.parse(0x18, bytearray([ord(data[14])]))
                     self.sensors.parse(0x19, bytearray([ord(data[15]), ord(data[16])]))
                     self.sensors.parse(0x1a, bytearray([ord(data[17]), ord(data[18])]))
+                    self.sensors.parse(9, bytearray([ord(data[19])]))
+                    self.sensors.parse(10, bytearray([ord(data[20])]))
+                    self.sensors.parse(11, bytearray([ord(data[21])]))
+                    self.sensors.parse(12, bytearray([ord(data[22])]))
                     self.positioning.positionCalculate()
                     self.__parent.taskUpdate()
                     self.__requestDataSelection = 0
                 elif (self.__requestDataSelection == 2):
 #                     print(':-o 2')
-                    data = self.__port.read(5)
+                    data = self.__port.read(9)
 #                     print('READING OUT VALUES! 2' + str(ord(data[0])))
                     self.sensors.parse(0x07, bytearray([ord(data[0])]))
                     self.sensors.parse(0x1B, bytearray([ord(data[1]), ord(data[2])]))
                     self.sensors.parse(0x0D, bytearray([ord(data[3])]))
                     self.sensors.parse(0x11, bytearray([ord(data[4])]))
+                    self.sensors.parse(9, bytearray([ord(data[5])]))
+                    self.sensors.parse(10, bytearray([ord(data[6])]))
+                    self.sensors.parse(11, bytearray([ord(data[7])]))
+                    self.sensors.parse(12, bytearray([ord(data[8])]))
                     self.__parent.taskUpdate()
                     self.__requestDataSelection = 0
                 else: 
@@ -985,13 +1012,13 @@ class iRobot():
             print('request more data')
             if (self.__requestDataSelection == 0):
                 self.__requestDataSelection = 1
-                self.__port.write(bytearray([0x95, 12, 0x13, 0x14, 0x07, 0x1B, 0x0D, 0x11, 0x0e, 0x16, 0x17, 0x18, 0x19, 0x1A]))
+                self.__port.write(bytearray([0x95, 16, 0x13, 0x14, 0x07, 0x1B, 0x0D, 0x11, 0x0e, 0x16, 0x17, 0x18, 0x19, 0x1A, 9, 10, 11, 12]))
         else:
             # Prescaler for 40ms
             print('HUMP & BUMP')
             if (self.__requestDataSelection == 0):
                 self.__requestDataSelection = 2
-                self.__port.write(bytearray([0x95, 0x04, 0x07, 0x1B, 0x0D, 0x11]))
+                self.__port.write(bytearray([0x95, 8, 0x07, 0x1B, 0x0D, 0x11, 9, 10, 11, 12]))
             self.__prescaler -= 1
 
         
@@ -1071,7 +1098,7 @@ class mainWidget(QtGui.QWidget):
         super(mainWidget, self).__init__()
         
         uic.loadUi('iRobotGUI.ui',self)
-#         self.robot = iRobot(self, "/dev/rfcomm0")
+        self.robot = iRobot(self, "/dev/rfcomm0")
 #         self.dial.setValue(500)
         self.label_3.setPixmap(QPixmap("./irobotcreate.jpg"))
 
@@ -1166,6 +1193,14 @@ class mainWidget(QtGui.QWidget):
         self.lineEdit.setText(Qt.QString.number(self.robot.sensors.voltage()))
         self.lineEdit_2.setText(Qt.QString("%1/%2").arg(self.robot.sensors.charge()).arg(self.robot.sensors.capacity()))
         self.lineEdit_3.setText(Qt.QString.number(self.robot.sensors.temperature()))
+        self.leftBumpCheckBox.setCheckState(self.robot.sensors.bumpLeft())
+        self.rightBumpCheckBox.setCheckState(self.robot.sensors.bumpRight())
+        
+        # Cliff sensors
+        self.cliffLeftCheckBox.setCheckState(self.robot.sensors.cliffLeft())
+        self.cliffFrontLeftCheckBox.setCheckState(self.robot.sensors.cliffFrontLeft())
+        self.cliffFrontRightCheckBox.setCheckState(self.robot.sensors.cliffFrontRight())
+        self.cliffRightCheckBox.setCheckState(self.robot.sensors.cliffRight())
     def taskUpdate(self):
         global shuttingDown
         # TODO:  Get angle and distance
